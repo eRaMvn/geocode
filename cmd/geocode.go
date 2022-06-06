@@ -22,6 +22,32 @@ https://geocoding.geo.census.gov/geocoder/geographies/address?street=458%20North
 // MAX is maximum number of requests at a time
 const MAX = 25
 
+type CsvWriter struct {
+	mutex     *sync.Mutex
+	csvWriter *csv.Writer
+}
+
+func NewCsvWriter(fileName string) (*CsvWriter, error) {
+	csvFile, err := os.Create(fileName)
+	if err != nil {
+		return nil, err
+	}
+	w := csv.NewWriter(csvFile)
+	return &CsvWriter{csvWriter: w, mutex: &sync.Mutex{}}, nil
+}
+
+func (w *CsvWriter) Write(row []string) {
+	w.mutex.Lock()
+	w.csvWriter.Write(row)
+	w.mutex.Unlock()
+}
+
+func (w *CsvWriter) Flush() {
+	w.mutex.Lock()
+	w.csvWriter.Flush()
+	w.mutex.Unlock()
+}
+
 var start time.Time
 
 func init() {
@@ -74,7 +100,7 @@ func genUrl(record []string) string {
 	return fullUrl
 }
 
-func writeNewRecord(wg *sync.WaitGroup, c chan int, record []string, w *csv.Writer) {
+func writeNewRecord(wg *sync.WaitGroup, c chan int, record []string, w *CsvWriter) {
 	defer wg.Done()
 	url := genUrl(record)
 	response := getResponse(url)
@@ -110,9 +136,8 @@ func writeNewRecord(wg *sync.WaitGroup, c chan int, record []string, w *csv.Writ
 		record = append(record, state+county+tract)
 	}
 
-	if err := w.Write(record); err != nil {
-		log.Println(err)
-	}
+	w.Write(record)
+
 	<-c
 }
 
@@ -127,15 +152,7 @@ func ExecuteTask() {
 		log.Fatal("Unable to read input file!")
 	}
 
-	// setup writer
-	csvOut, err := os.Create(resultFileName)
-
-	if err != nil {
-		log.Fatal("Unable to open output!")
-	}
-
-	w := csv.NewWriter(csvOut)
-	defer csvOut.Close()
+	w, _ := NewCsvWriter(resultFileName)
 
 	r := csv.NewReader(csvIn)
 
